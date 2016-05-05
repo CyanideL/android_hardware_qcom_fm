@@ -65,6 +65,7 @@
             android:screenOrientation="portrait"
             android:allowTaskReparenting="true"
             android:launchMode="singleTask"
+            android:configChanges="keyboardHidden|orientation|screenSize"
             android:theme="@style/FMTheme"
             android:excludeFromRecents="false" >
 
@@ -82,7 +83,6 @@
 
         <receiver android:name="com.caf.fmradio.FMMediaButtonIntentReceiver">
             <intent-filter>
-                 <action android:name="android.intent.action.MEDIA_BUTTON" />
                  <action android:name="android.media.AUDIO_BECOMING_NOISY" />
             </intent-filter>
         </receiver>

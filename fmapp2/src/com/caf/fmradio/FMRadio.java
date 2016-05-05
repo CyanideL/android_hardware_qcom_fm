@@ -42,6 +42,7 @@ import android.content.DialogInterface.OnKeyListener;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.BroadcastReceiver;
+import android.content.res.Configuration;
 import android.media.AudioSystem;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
@@ -443,6 +444,12 @@ public class FMRadio extends Activity
    }
 
    @Override
+   public void onConfigurationChanged(Configuration newConfig) {
+       Log.d(LOGTAG, "onConfigurationChanged");
+       super.onConfigurationChanged(newConfig);
+   }
+
+   @Override
    public void onRestart() {
       Log.d(LOGTAG, "FMRadio: onRestart");
       try {
@@ -528,43 +535,56 @@ public class FMRadio extends Activity
 
    @Override
    public void onResume() {
+      Log.d(LOGTAG, "FMRadio: onResume");
+
       super.onResume();
+
       syncScanState();
+
+      // TODO: We should return on exception or continue?
       try {
-         if(mService != null) {
-            mService.registerCallbacks(mServiceCallbacks);
-         }
-      }catch (RemoteException e) {
-         e.printStackTrace();
+          if (mService != null)
+              mService.registerCallbacks(mServiceCallbacks);
+      } catch (RemoteException e) {
+          e.printStackTrace();
       }
-      if(isSleepTimerActive()) {
+
+      if (isSleepTimerActive()) {
           Log.d(LOGTAG, "isSleepTimerActive is true");
           try {
-               if(null != mService) {
+               if (mService != null)
                   mService.cancelDelayedStop(FMRadioService.STOP_SERVICE);
-               }
                if(null != mSleepUpdateHandlerThread) {
                   mSleepUpdateHandlerThread.interrupt();
                }
-          }catch (Exception e) {
+          } catch (Exception e) {
                e.printStackTrace();
           }
           initiateSleepThread();
       }
-      if(isRecording()) {
+
+      if (isRecording()) {
           Log.d(LOGTAG,"isRecordTimerActive is true");
           try {
-            if (null != mService) {
-                mService.cancelDelayedStop(FMRadioService.STOP_RECORD);
-            }
-          }catch (Exception e) {
-            e.printStackTrace();
+              if (mService != null)
+                  mService.cancelDelayedStop(FMRadioService.STOP_RECORD);
+          } catch (Exception e) {
+              e.printStackTrace();
           }
           if(isRecording()) {
               initiateRecordThread();
           }
       }
-      Log.d(LOGTAG, "FMRadio: onResume");
+
+      // we might lose audio focus between pause and restart,
+      // hence request it again
+      try {
+           if (mService != null)
+               mService.requestFocus();
+      } catch (Exception e) {
+           e.printStackTrace();
+      }
+
       mStereo = FmSharedPreferences.getLastAudioMode();
       mHandler.post(mUpdateProgramService);
       mHandler.post(mUpdateRadioText);
@@ -990,9 +1010,10 @@ public class FMRadio extends Activity
                 String action = data.getAction();
                 if (action != null) {
                   if (action.equals(Settings.RESTORE_FACTORY_DEFAULT_ACTION)) {
+                      disableRadio();
                       RestoreDefaults();
-                      enableRadioOnOffUI();
-                      tuneRadio(FmSharedPreferences.DEFAULT_NO_FREQUENCY);
+                      FmSharedPreferences.setTunedFrequency(FmSharedPreferences.DEFAULT_NO_FREQUENCY);
+                      enableRadio();
                       FmSharedPreferences.addStation("", FmSharedPreferences.DEFAULT_NO_FREQUENCY, 0);
                   }
                }
@@ -1676,24 +1697,24 @@ public class FMRadio extends Activity
 
    private void disableRadio() {
       boolean bStatus = false;
-      boolean bSpeakerPhoneOn = isSpeakerEnabled();
+
       cancelSearch();
       endSleepTimer();
+
+      // Stop if there is an ongoing Record
       if(mRecording) {
-         //Stop if there is an ongoing Record
          stopRecording();
       }
+
       if(mService != null) {
          try {
-            if(bSpeakerPhoneOn) {
-               mService.enableSpeaker(false);
-            }
             bStatus = mService.fmOff();
-            enableRadioOnOffUI();
             if (bStatus == false) {
                 mCommandFailed = CMD_FMOFF;
                 Log.e(LOGTAG, " mService.fmOff failed");
             }
+
+            enableRadioOnOffUI();
          }catch (RemoteException e) {
             e.printStackTrace();
          }
@@ -1823,15 +1844,6 @@ public class FMRadio extends Activity
    }
 
    private void stopRecording() {
-       mRecording = false;
-       DebugToasts("Stopped Recording", Toast.LENGTH_SHORT);
-       if(null != mRecordUpdateHandlerThread) {
-          mRecordUpdateHandlerThread.interrupt();
-       }
-       if(null != mRecordingMsgTV) {
-          mRecordingMsgTV.setText("");
-          setRecordingStartImage();
-       }
        if (mService != null) {
            try {
               mService.stopRecording();
@@ -1839,7 +1851,6 @@ public class FMRadio extends Activity
               e.printStackTrace();
            }
         }
-        invalidateOptionsMenu();
    }
 
    private boolean isRecording() {
@@ -2074,10 +2085,6 @@ public class FMRadio extends Activity
         }else{
             mSpeakerButton.setImageResource(R.drawable.btn_earphone);
         }
-        if (isA2DPConnected())
-            mSpeakerButton.setClickable(false);
-        else
-            mSpeakerButton.setClickable(true);
       }
    }
 
@@ -2281,13 +2288,13 @@ public class FMRadio extends Activity
    }
 
    private void A2DPConnectionState(boolean state) {
-      Log.d(LOGTAG, "A2DPConnectionState with:" +state);
+      Log.d(LOGTAG, "A2DPConnectionState with: " + state);
       if (state) {
-          Log.d(LOGTAG, "make speaker button disable");
-          mSpeakerButton.setClickable(false);
+          Log.d(LOGTAG, "A2DP connected, set button to speaker");
+          mSpeakerButton.setImageResource(R.drawable.btn_speaker);
       } else {
-          Log.d(LOGTAG, "make speaker button enable");
-          mSpeakerButton.setClickable(true);
+          Log.d(LOGTAG, "A2DP dis-connected, set button to earphone");
+          mSpeakerButton.setImageResource(R.drawable.btn_earphone);
       }
    }
    /** Scan related */
@@ -2665,7 +2672,7 @@ public class FMRadio extends Activity
 
    @Override
    public boolean onKeyDown(int keyCode, KeyEvent event) {
-       Log.d(LOGTAG, "KEY event received" + keyCode);
+       Log.d(LOGTAG, "KEY event received " + keyCode);
        switch (keyCode) {
            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
            case 126: //KeyEvent.KEYCODE_MEDIA_PLAY:
@@ -3227,7 +3234,15 @@ public class FMRadio extends Activity
       }
       public void onRecordingStopped() {
          Log.d(LOGTAG, "mServiceCallbacks.onRecordingStopped:");
-         stopRecording();
+         mRecording = false;
+         if(null != mRecordUpdateHandlerThread) {
+            mRecordUpdateHandlerThread.interrupt();
+         }
+         if(null != mRecordingMsgTV) {
+            mRecordingMsgTV.setText("");
+            setRecordingStartImage();
+         }
+         invalidateOptionsMenu();
       }
       public void onRecordingStarted()
       {
@@ -3241,6 +3256,16 @@ public class FMRadio extends Activity
       public void onA2DPConnectionstateChanged(boolean state){
           Log.d(LOGTAG, "mServiceCallbacks.onA2DPConnectionstateChanged :");
           A2DPConnectionState(state);
+      }
+      public void onFmAudioPathStarted() {
+          Log.d(LOGTAG, "mServiceCallbacks.onFmAudioPathStarted:");
+          mSpeakerButton.setClickable(true);
+          mMuteButton.setClickable(true);
+      }
+      public void onFmAudioPathStopped() {
+          Log.d(LOGTAG, "mServiceCallbacks.onFmAudioPathStopped:");
+          mSpeakerButton.setClickable(false);
+          mMuteButton.setClickable(false);
       }
    };
 
